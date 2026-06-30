@@ -4,7 +4,8 @@ FastAPI service for AI text generation with per-user quota enforcement, credit m
 
 ## Preview
 
-- C4 diagram: [docs/c4.md](docs/c4.md)
+- Design doc: [docs/design.md](docs/design.md)
+- C4 diagrams: [docs/c4.md](docs/c4.md)
 
 ## Run
 
@@ -12,10 +13,12 @@ FastAPI service for AI text generation with per-user quota enforcement, credit m
 docker compose up --build
 ```
 
-To apply the first migration after the stack is up:
+The container runs `alembic upgrade head` on startup, so the schema is created automatically.
+
+## Test
 
 ```bash
-docker compose exec api alembic upgrade head
+docker compose run --rm api pytest
 ```
 
 ## What is included in this first scaffold
@@ -26,6 +29,7 @@ docker compose exec api alembic upgrade head
 - Alembic migration scaffold
 - DDD + hexagonal package layout
 - Architecture preview document
+- Usage metering and quota service implementation
 
 ## Local URLs
 
@@ -33,9 +37,14 @@ docker compose exec api alembic upgrade head
 - OpenAPI: `http://localhost:8000/docs`
 - Postgres: `localhost:5432`
 
+## API
+
+- `PUT /users/{user_key}/quota`
+- `POST /users/{user_key}/generate`
+- `GET /users/{user_key}/usage`
+- `GET /users/{user_key}/usage/records`
+
 ## Next build steps
 
-- Wire application use cases to the repository ports
-- Add quota reservation and usage reconciliation
-- Implement the mock AI adapter
-- Add tests for quota behavior and concurrent requests
+- Expand documentation with the design decision write-up
+- Record the walkthrough video
