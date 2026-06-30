@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.domain.errors import MeteringStateInconsistent
 from app.domain.models import GenerationResult, QuotaPolicy, Reservation, UsageRecord, UsageSummary
 from app.domain.policies import calculate_billable_credits
 from app.infrastructure.db.models import QuotaReservationORM, UsageLedgerORM, UserORM
@@ -179,15 +180,19 @@ class PostgresMeteringRepository:
             user = (
                 session.execute(select(UserORM).where(UserORM.user_key == user_key).with_for_update())
                 .scalars()
-                .one()
+                .one_or_none()
             )
+            if user is None:
+                raise MeteringStateInconsistent(f"missing quota policy for user={user_key}")
             reservation = (
                 session.execute(
                     select(QuotaReservationORM).where(QuotaReservationORM.request_id == request_id)
                 )
                 .scalars()
-                .one()
+                .one_or_none()
             )
+            if reservation is None:
+                raise MeteringStateInconsistent(f"missing reservation for request_id={request_id}")
             reservation.status = "completed"
             reservation.actual_credits = usage.billable_credits
             reservation.actual_total_tokens = usage.total_tokens
@@ -243,15 +248,11 @@ class PostgresMeteringRepository:
                 .one_or_none()
             )
             if reservation is None:
-                return Reservation(
-                    request_id,
-                    user_key,
-                    0,
-                    0,
-                    "failed",
-                    error_message,
-                    Decimal(user.credit_multiplier) if user is not None else None,
+                raise MeteringStateInconsistent(
+                    f"missing reservation for request_id={request_id} user={user_key}"
                 )
+            if user is None:
+                raise MeteringStateInconsistent(f"missing quota policy for user={user_key}")
             reservation.status = "failed"
             reservation.error_message = error_message
             reservation.updated_at = datetime.now(tz=UTC)

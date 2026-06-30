@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.api.dependencies import get_metering_service
 from app.application.use_cases import GenerateTextCommand, MeteringService, UpsertQuotaCommand
-from app.domain.errors import GenerationFailed, QuotaExceeded
+from app.domain.errors import GenerationFailed, MeteringStateInconsistent, QuotaExceeded
 from app.domain.models import GenerationResult, QuotaPolicy, Reservation, UsageRecord, UsageSummary
 from app.domain.policies import calculate_billable_credits
 from app.main import app
@@ -248,6 +248,26 @@ def test_multiplier_changes_credit_cost_between_users(service: tuple[MeteringSer
     assert bob.billable_credits == alice.billable_credits * 2
 
 
+def test_users_can_have_different_quota_limits(service: tuple[MeteringService, FakeMeteringRepository, FakeAIProvider]) -> None:
+    metering_service, _, _ = service
+    metering_service.upsert_quota("alice", UpsertQuotaCommand(5, Decimal("1.0")))
+    metering_service.upsert_quota("bob", UpsertQuotaCommand(100, Decimal("1.0")))
+
+    with pytest.raises(QuotaExceeded):
+        metering_service.generate_text(
+            "alice",
+            GenerateTextCommand(request_id="req-alice-quota", prompt="short prompt", max_completion_tokens=10),
+        )
+
+    result = metering_service.generate_text(
+        "bob",
+        GenerateTextCommand(request_id="req-bob-quota", prompt="short prompt", max_completion_tokens=10),
+    )
+
+    assert result.request_id == "req-bob-quota"
+    assert result.billable_credits > 0
+
+
 def test_quota_exceeded_rejects_before_ai(service: tuple[MeteringService, FakeMeteringRepository, FakeAIProvider]) -> None:
     metering_service, _, _ = service
     metering_service.upsert_quota("alice", UpsertQuotaCommand(5, Decimal("1.0")))
@@ -291,6 +311,31 @@ def test_usage_summary_reports_remaining_and_reservations(service: tuple[Meterin
     records = metering_service.list_usage_records("alice")
     assert len(records) == 1
     assert records[0].estimated_credits == result.estimated_credits
+
+
+def test_multiplier_update_does_not_change_prior_usage_records(
+    service: tuple[MeteringService, FakeMeteringRepository, FakeAIProvider],
+) -> None:
+    metering_service, _, _ = service
+    metering_service.upsert_quota("alice", UpsertQuotaCommand(100, Decimal("1.0")))
+
+    first = metering_service.generate_text(
+        "alice",
+        GenerateTextCommand(request_id="req-old", prompt="original prompt", max_completion_tokens=10),
+    )
+
+    metering_service.upsert_quota("alice", UpsertQuotaCommand(100, Decimal("2.0")))
+
+    second = metering_service.generate_text(
+        "alice",
+        GenerateTextCommand(request_id="req-new", prompt="new prompt", max_completion_tokens=10),
+    )
+
+    records = {record.request_id: record for record in metering_service.list_usage_records("alice")}
+    assert records["req-old"].multiplier_snapshot == Decimal("1.0")
+    assert records["req-new"].multiplier_snapshot == Decimal("2.0")
+    assert first.multiplier_snapshot == Decimal("1.0")
+    assert second.multiplier_snapshot == Decimal("2.0")
 
 
 def test_actual_usage_can_differ_from_estimate(service: tuple[MeteringService, FakeMeteringRepository, FakeAIProvider]) -> None:
@@ -362,5 +407,36 @@ def test_api_routes_accept_and_return_dtos(service: tuple[MeteringService, FakeM
         assert history_response.status_code == 200
         history_body = history_response.json()
         assert len(history_body["items"]) == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_api_returns_clear_error_for_inconsistent_state(
+    service: tuple[MeteringService, FakeMeteringRepository, FakeAIProvider],
+) -> None:
+    metering_service, repository, _ = service
+
+    class BrokenRepository(FakeMeteringRepository):
+        def finalize_success(self, user_key: str, request_id: str, usage: UsageRecord) -> GenerationResult:
+            raise MeteringStateInconsistent(f"missing reservation for request_id={request_id} user={user_key}")
+
+    broken_repository = BrokenRepository(
+        policies=repository.policies,
+        reservations=repository.reservations,
+        ledger=repository.ledger,
+        lock=repository.lock,
+    )
+    broken_service = MeteringService(broken_repository, FakeAIProvider())
+    broken_service.upsert_quota("alice", UpsertQuotaCommand(100, Decimal("1.0")))
+
+    app.dependency_overrides[get_metering_service] = lambda: broken_service
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/users/alice/generate",
+            json={"request_id": "req-broken", "prompt": "hello api", "max_completion_tokens": 10},
+        )
+        assert response.status_code == 500
+        assert response.json()["error"] == "inconsistent_state"
     finally:
         app.dependency_overrides.clear()

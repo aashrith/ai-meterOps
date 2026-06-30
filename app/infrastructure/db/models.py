@@ -25,7 +25,7 @@ class QuotaReservationORM(Base):
     __tablename__ = "quota_reservations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_key: Mapped[str] = mapped_column(ForeignKey("users.user_key"), String(128), nullable=False)
+    user_key: Mapped[str] = mapped_column(String(128), ForeignKey("users.user_key"), nullable=False)
     request_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     estimated_credits: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_total_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -41,7 +41,7 @@ class UsageLedgerORM(Base):
     __tablename__ = "usage_ledger"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_key: Mapped[str] = mapped_column(ForeignKey("users.user_key"), String(128), nullable=False)
+    user_key: Mapped[str] = mapped_column(String(128), ForeignKey("users.user_key"), nullable=False)
     request_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False)

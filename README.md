@@ -6,6 +6,7 @@ FastAPI service for AI text generation with per-user quota enforcement, credit m
 
 - Design doc: [docs/design.md](docs/design.md)
 - C4 diagrams: [docs/c4.md](docs/c4.md)
+- Data model ERD: [docs/data-model.md](docs/data-model.md)
 
 ## Run
 

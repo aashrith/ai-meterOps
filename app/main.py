@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import router
 from app.domain.errors import (
     GenerationFailed,
+    MeteringStateInconsistent,
     QuotaConfigurationMissing,
     QuotaExceeded,
     RequestAlreadyExists,
@@ -41,3 +42,8 @@ def request_in_progress_handler(_, exc: RequestInProgress) -> JSONResponse:
 @app.exception_handler(GenerationFailed)
 def generation_failed_handler(_, exc: GenerationFailed) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc), "error": "generation_failed"})
+
+
+@app.exception_handler(MeteringStateInconsistent)
+def metering_state_inconsistent_handler(_, exc: MeteringStateInconsistent) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"detail": str(exc), "error": "inconsistent_state"})

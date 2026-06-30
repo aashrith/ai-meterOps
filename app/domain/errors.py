@@ -21,3 +21,6 @@ class RequestInProgress(MeteringError):
 class GenerationFailed(MeteringError):
     pass
 
+
+class MeteringStateInconsistent(MeteringError):
+    """Raised when the persisted metering state is missing or contradictory."""
