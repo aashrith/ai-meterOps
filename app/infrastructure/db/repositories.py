@@ -215,11 +215,6 @@ class PostgresMeteringRepository:
             )
             session.add(ledger)
             summary = self._build_summary(session, user)
-            quota_status = "within_quota"
-            if summary.remaining_credits == 0 and summary.used_credits >= summary.quota_limit_credits:
-                quota_status = "at_quota"
-            if summary.used_credits > summary.quota_limit_credits:
-                quota_status = "over_quota"
             return GenerationResult(
                 request_id=request_id,
                 output_text=usage.output_text,
@@ -229,7 +224,7 @@ class PostgresMeteringRepository:
                 estimated_credits=usage.estimated_credits,
                 billable_credits=usage.billable_credits,
                 remaining_credits=summary.remaining_credits,
-                quota_status=quota_status,
+                quota_status=self._quota_status(summary),
                 multiplier_snapshot=usage.multiplier_snapshot,
                 created_at=usage.created_at,
             )
@@ -312,11 +307,6 @@ class PostgresMeteringRepository:
             if user is None:
                 return None
             summary = self._build_summary(session, user)
-            quota_status = "within_quota"
-            if summary.remaining_credits == 0 and summary.used_credits >= summary.quota_limit_credits:
-                quota_status = "at_quota"
-            if summary.used_credits > summary.quota_limit_credits:
-                quota_status = "over_quota"
             return GenerationResult(
                 request_id=ledger.request_id,
                 output_text=ledger.output_text,
@@ -326,7 +316,7 @@ class PostgresMeteringRepository:
                 estimated_credits=ledger.estimated_credits,
                 billable_credits=ledger.billable_credits,
                 remaining_credits=summary.remaining_credits,
-                quota_status=quota_status,
+                quota_status=self._quota_status(summary),
                 multiplier_snapshot=Decimal(ledger.multiplier_snapshot),
                 created_at=ledger.created_at,
             )
@@ -356,3 +346,11 @@ class PostgresMeteringRepository:
             used_credits=int(used_credits),
             reserved_credits=int(reserved_credits),
         )
+
+    @staticmethod
+    def _quota_status(summary: UsageSummary) -> str:
+        if summary.used_credits > summary.quota_limit_credits:
+            return "over_quota"
+        if summary.remaining_credits == 0:
+            return "at_quota"
+        return "within_quota"

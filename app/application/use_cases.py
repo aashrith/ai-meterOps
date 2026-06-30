@@ -11,7 +11,7 @@ from app.domain.errors import (
     RequestAlreadyExists,
     RequestInProgress,
 )
-from app.domain.models import GenerationResult, GenerationUsage, UsageRecord, UsageSummary
+from app.domain.models import GenerationResult, GenerationUsage, QuotaPolicy, UsageRecord, UsageSummary
 from app.domain.policies import calculate_billable_credits, count_prompt_tokens
 from app.ports.ai import AIProvider
 from app.ports.repositories import MeteringRepository
@@ -60,19 +60,9 @@ class MeteringService:
             prompt_tokens=prompt_tokens,
             max_completion_tokens=command.max_completion_tokens,
         )
-        if reservation.status == "missing":
-            raise QuotaConfigurationMissing(user_key)
-        if reservation.status == "in_progress":
-            raise RequestInProgress(command.request_id)
-        if reservation.status == "duplicate":
-            existing = self._repository.get_generation_result(command.request_id)
-            if existing is not None:
-                return existing
-            raise RequestAlreadyExists(command.request_id)
-        if reservation.status == "quota_exceeded":
-            raise QuotaExceeded(
-                f"user={user_key} estimated={reservation.estimated_credits} remaining={summary.remaining_credits}"
-            )
+        existing = self._resolve_reservation_result(user_key, command.request_id, reservation, summary)
+        if existing is not None:
+            return existing
 
         try:
             output_text, usage = self._ai_provider.generate(command.prompt, command.max_completion_tokens)
@@ -80,6 +70,47 @@ class MeteringService:
             self._repository.mark_failed(user_key, command.request_id, str(exc))
             raise GenerationFailed(str(exc)) from exc
 
+        record = self._build_usage_record(
+            user_key=user_key,
+            request_id=command.request_id,
+            output_text=output_text,
+            usage=usage,
+            reservation=reservation,
+            summary=summary,
+        )
+        return self._repository.finalize_success(user_key, command.request_id, record)
+
+    def _resolve_reservation_result(
+        self,
+        user_key: str,
+        request_id: str,
+        reservation,
+        summary: UsageSummary,
+    ) -> GenerationResult | None:
+        if reservation.status == "missing":
+            raise QuotaConfigurationMissing(user_key)
+        if reservation.status == "in_progress":
+            raise RequestInProgress(request_id)
+        if reservation.status == "duplicate":
+            existing = self._repository.get_generation_result(request_id)
+            if existing is not None:
+                return existing
+            raise RequestAlreadyExists(request_id)
+        if reservation.status == "quota_exceeded":
+            raise QuotaExceeded(
+                f"user={user_key} estimated={reservation.estimated_credits} remaining={summary.remaining_credits}"
+            )
+        return None
+
+    def _build_usage_record(
+        self,
+        user_key: str,
+        request_id: str,
+        output_text: str,
+        usage: dict[str, int],
+        reservation,
+        summary: UsageSummary,
+    ) -> UsageRecord:
         generation_usage = GenerationUsage(
             prompt_tokens=usage["prompt_tokens"],
             completion_tokens=usage["completion_tokens"],
@@ -87,8 +118,8 @@ class MeteringService:
         )
         multiplier_snapshot = reservation.multiplier_snapshot or summary.credit_multiplier
         billable_credits = calculate_billable_credits(generation_usage.total_tokens, multiplier_snapshot)
-        record = UsageRecord(
-            request_id=command.request_id,
+        return UsageRecord(
+            request_id=request_id,
             user_key=user_key,
             prompt_tokens=generation_usage.prompt_tokens,
             completion_tokens=generation_usage.completion_tokens,
@@ -100,4 +131,3 @@ class MeteringService:
             status="completed",
             created_at=datetime.now(tz=UTC),
         )
-        return self._repository.finalize_success(user_key, command.request_id, record)
