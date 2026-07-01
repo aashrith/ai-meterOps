@@ -4,7 +4,7 @@ FastAPI service for AI text generation with per-user quota enforcement, credit m
 
 ## Reviewer Guide
 
-- Design rationale: [docs/design.md](docs/design.md)
+- Solution design: [docs/design.md](docs/design.md)
 - C4 architecture: [docs/c4.md](docs/c4.md)
 - Data model ERD: [docs/data-model.md](docs/data-model.md)
 
